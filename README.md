@@ -17,10 +17,11 @@ A lightweight Python script that simulates an F13 keypress at a configurable int
 
 - **Configurable interval** — set how often (in seconds) F13 is pressed
 - **Auto stop time** — define an end time (`HH:MM`) after which the script stops automatically; leave blank to run indefinitely
-- **Stealth mode** — hide the console window entirely for a background-only experience
-- **Verbose logging** — when not in stealth mode, each keypress is logged with a timestamp
-- **Clean exit** — supports `CTRL+C` for manual interruption at any time
-- **Zero dependencies** — uses only the Python standard library (`ctypes`, `time`, `datetime`)
+- **System tray icon** — runs silently in the background with an icon in the Windows taskbar tray
+- **Tray context menu** — right-click (or left-click) the tray icon to open a menu with status and exit option
+- **Auto stealth launch** — if started with `python.exe`, the script automatically relaunches itself using `pythonw.exe` (no console window)
+- **Responsive stop** — the F13 loop checks the stop signal every 100 ms, so exit is near-instant
+- **Zero external dependencies** — uses only the Python standard library (`ctypes`, `threading`, `subprocess`, `datetime`)
 
 ---
 
@@ -36,7 +37,6 @@ A lightweight Python script that simulates an F13 keypress at a configurable int
 Edit the `CONFIG` section at the top of `F13.py`:
 
 ```python
-STEALTH        = False    # True  → hide console window
 INTERVALLO_SEC = 180      # interval between keypresses (seconds)
 ORARIO_FINE    = "18:00"  # stop time "HH:MM", or "" / None to run forever
 ```
@@ -49,7 +49,9 @@ ORARIO_FINE    = "18:00"  # stop time "HH:MM", or "" / None to run forever
 python F13.py
 ```
 
-To run without a visible console window, set `STEALTH = True` before launching, or compile to an executable with a tool like PyInstaller:
+The script automatically hides itself: if launched with `python.exe` it relaunches under `pythonw.exe` with no console window. A tray icon appears in the Windows taskbar — click it to see the status or exit.
+
+To distribute as a single executable:
 
 ```bash
 pyinstaller --noconsole --onefile F13.py
@@ -59,20 +61,27 @@ pyinstaller --noconsole --onefile F13.py
 
 ## How it works
 
-The script uses the Windows `user32.keybd_event` API to simulate pressing and releasing the F13 key (virtual key code `0x7C`). F13 is not bound to any default system action, so it acts as an invisible activity signal without interfering with your workflow.
-
 ```
-loop:
-    if current time >= ORARIO_FINE → exit
+startup:
+    if running under python.exe → relaunch under pythonw.exe and exit
+    register hidden window + tray icon
+    start F13 loop on a background thread
+
+loop (background thread):
+    if current time >= ORARIO_FINE → post WM_CLOSE and exit
     send F13 keydown + keyup
-    wait INTERVALLO_SEC seconds
+    wait INTERVALLO_SEC seconds (interruptible every 100 ms)
+
+tray menu:
+    left/right click → show popup menu
+    "Esci" → WM_CLOSE → remove tray icon, stop loop, quit
 ```
 
 ---
 
 ## Disclaimer
 
-This tool is provided for **educational purposes** to demonstrate synthetic input on Windows. Use it responsibly and in compliance with your organization's policies.
+This tool is provided for **educational purposes** to demonstrate synthetic input and Win32 tray integration on Windows. Use it responsibly and in compliance with your organization's policies.
 
 ---
 ---
@@ -82,7 +91,7 @@ This tool is provided for **educational purposes** to demonstrate synthetic inpu
 
 Uno script Python leggero che simula la pressione del tasto F13 a intervalli configurabili per mantenere attivo il proprio stato su Microsoft Teams (o qualsiasi app che rileva l'attivita' da tastiera).
 
-> **Solo a scopo educativo.** Questo progetto dimostra come inviare eventi tastiera sintetici su Windows tramite la libreria `ctypes`.
+> **Solo a scopo educativo.** Questo progetto dimostra come inviare eventi tastiera sintetici e integrare un'icona nella tray di Windows tramite la libreria `ctypes`.
 
 ---
 
@@ -90,10 +99,11 @@ Uno script Python leggero che simula la pressione del tasto F13 a intervalli con
 
 - **Intervallo configurabile** — imposta ogni quanti secondi viene premuto F13
 - **Orario di fine automatico** — definisci un orario (`HH:MM`) oltre il quale lo script si ferma; lascia vuoto per eseguirlo a tempo indeterminato
-- **Modalita' stealth** — nascondi completamente la finestra della console per un'esecuzione in background
-- **Log verboso** — quando non e' in modalita' stealth, ogni pressione viene registrata con un timestamp
-- **Uscita pulita** — supporta `CTRL+C` per l'interruzione manuale in qualsiasi momento
-- **Zero dipendenze** — utilizza solo la libreria standard di Python (`ctypes`, `time`, `datetime`)
+- **Icona nella system tray** — gira silenziosamente in background con un'icona nella barra delle applicazioni di Windows
+- **Menu contestuale tray** — clic destro (o sinistro) sull'icona per aprire un menu con stato e opzione di uscita
+- **Avvio stealth automatico** — se avviato con `python.exe`, lo script si ri-lancia automaticamente con `pythonw.exe` (nessuna finestra console)
+- **Stop reattivo** — il loop F13 controlla il segnale di stop ogni 100 ms, quindi l'uscita e' quasi istantanea
+- **Zero dipendenze esterne** — utilizza solo la libreria standard di Python (`ctypes`, `threading`, `subprocess`, `datetime`)
 
 ---
 
@@ -109,7 +119,6 @@ Uno script Python leggero che simula la pressione del tasto F13 a intervalli con
 Modifica la sezione `CONFIG` in cima a `F13.py`:
 
 ```python
-STEALTH        = False    # True  → nascondi la finestra console
 INTERVALLO_SEC = 180      # intervallo tra le pressioni (secondi)
 ORARIO_FINE    = "18:00"  # orario di fine "HH:MM", oppure "" / None per infinito
 ```
@@ -122,7 +131,9 @@ ORARIO_FINE    = "18:00"  # orario di fine "HH:MM", oppure "" / None per infinit
 python F13.py
 ```
 
-Per eseguire senza finestra console visibile, imposta `STEALTH = True` prima di avviare, oppure compila in un eseguibile con PyInstaller:
+Lo script si nasconde automaticamente: se avviato con `python.exe` si ri-lancia sotto `pythonw.exe` senza finestra console. Un'icona appare nella tray di Windows — cliccala per vedere lo stato o uscire.
+
+Per distribuire come eseguibile singolo:
 
 ```bash
 pyinstaller --noconsole --onefile F13.py
@@ -132,17 +143,24 @@ pyinstaller --noconsole --onefile F13.py
 
 ## Come funziona
 
-Lo script utilizza l'API Windows `user32.keybd_event` per simulare la pressione e il rilascio del tasto F13 (codice virtuale `0x7C`). F13 non e' associato a nessuna azione di sistema predefinita, quindi agisce come segnale di attivita' invisibile senza interferire con il flusso di lavoro.
-
 ```
-loop:
-    se orario attuale >= ORARIO_FINE → esci
+avvio:
+    se in esecuzione sotto python.exe → ri-lancia sotto pythonw.exe ed esci
+    registra finestra nascosta + icona tray
+    avvia il loop F13 su un thread in background
+
+loop (thread background):
+    se orario attuale >= ORARIO_FINE → invia WM_CLOSE ed esci
     invia F13 keydown + keyup
-    attendi INTERVALLO_SEC secondi
+    attendi INTERVALLO_SEC secondi (interrompibile ogni 100 ms)
+
+menu tray:
+    clic sinistro/destro → mostra menu popup
+    "Esci" → WM_CLOSE → rimuove icona tray, ferma loop, chiude
 ```
 
 ---
 
 ## Disclaimer
 
-Questo strumento e' fornito a **scopo educativo** per dimostrare l'input sintetico su Windows. Utilizzalo in modo responsabile e nel rispetto delle politiche della tua organizzazione.
+Questo strumento e' fornito a **scopo educativo** per dimostrare l'input sintetico e l'integrazione con la tray Win32 su Windows. Utilizzalo in modo responsabile e nel rispetto delle politiche della tua organizzazione.
