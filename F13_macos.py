@@ -25,13 +25,22 @@ import ctypes.util
 import signal
 import threading
 import subprocess
+import logging
 from datetime import datetime
 
 # ========= CONFIG =========
 INTERVALLO_SEC = 180        # ogni quanti secondi premere F13
 ORARIO_FINE = "18:00"       # "HH:MM" oppure None / "" per infinito
 AVVIO_SILENZIOSO = True     # True: si ri-lancia staccato dal terminale
+LOG_FILE = os.path.expanduser("~/Library/Logs/F13Sender.log")
 # =========================
+
+# --debug: resta in primo piano, log a video, intervallo breve.
+DEBUG = "--debug" in sys.argv
+if DEBUG:
+    AVVIO_SILENZIOSO = False
+    INTERVALLO_SEC = 5
+    ORARIO_FINE = ""
 
 _ENV_DETACHED = "F13_DETACHED"
 
@@ -97,6 +106,11 @@ appservices.CGEventPost.restype = None
 appservices.AXIsProcessTrusted.argtypes = []
 appservices.AXIsProcessTrusted.restype = ctypes.c_bool
 
+# Idle di sistema: secondi dall'ultimo evento di input (qualsiasi tipo).
+kCGAnyInputEventType = 0xFFFFFFFF
+appservices.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
+appservices.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
+
 corefoundation.CFRelease.argtypes = [ctypes.c_void_p]
 corefoundation.CFRelease.restype = None
 
@@ -104,6 +118,35 @@ corefoundation.CFRelease.restype = None
 stop_event = threading.Event()
 event_source = None
 app_delegate = None
+
+log = logging.getLogger("f13")
+pressioni = 0
+ultima_pressione = None
+ultimo_esito = "in attesa della prima pressione"
+
+
+def setup_logging():
+    """Log sempre su file; anche a video in --debug."""
+    log.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        fh = logging.FileHandler(LOG_FILE)
+        fh.setFormatter(fmt)
+        log.addHandler(fh)
+    except OSError as e:
+        sys.stderr.write("Impossibile scrivere il log in {}: {}\n".format(LOG_FILE, e))
+    if DEBUG:
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(fmt)
+        log.addHandler(sh)
+
+
+def idle_sistema():
+    """Secondi dall'ultimo evento di input ricevuto dal sistema."""
+    return appservices.CGEventSourceSecondsSinceLastEventType(
+        kCGEventSourceStateHIDSystemState, kCGAnyInputEventType
+    )
 
 
 def parse_end_time(hhmm):
@@ -148,19 +191,49 @@ def _applescript_quote(s):
 
 
 def press_f13():
-    """Invia keydown + keyup di F13 al livello HID."""
-    global event_source
+    """Invia keydown + keyup di F13 al livello HID.
+
+    Verifica l'esito confrontando l'idle di sistema prima e dopo: se
+    l'evento e' stato accettato l'idle si azzera. Se resta alto, macOS lo
+    ha scartato (quasi sempre: manca il permesso Accessibilita').
+    """
+    global event_source, pressioni, ultima_pressione, ultimo_esito
+
     if event_source is None:
         event_source = appservices.CGEventSourceCreate(kCGEventSourceStateHIDSystemState)
+        if not event_source:
+            ultimo_esito = "ERRORE: impossibile creare la sorgente eventi"
+            log.error(ultimo_esito)
+            return False
+
+    idle_prima = idle_sistema()
 
     for is_down in (True, False):
         evt = appservices.CGEventCreateKeyboardEvent(event_source, kVK_F13, is_down)
         if not evt:
-            return
+            ultimo_esito = "ERRORE: creazione evento fallita"
+            log.error(ultimo_esito)
+            return False
         appservices.CGEventPost(kCGHIDEventTap, evt)
         corefoundation.CFRelease(evt)
         if is_down:
             time.sleep(0.03)
+
+    time.sleep(0.05)  # lascia al sistema il tempo di registrare l'evento
+    idle_dopo = idle_sistema()
+
+    pressioni += 1
+    ultima_pressione = datetime.now()
+    ok = idle_dopo < idle_prima or idle_dopo < 1.0
+
+    if ok:
+        ultimo_esito = "OK (idle azzerato: {:.1f}s -> {:.1f}s)".format(idle_prima, idle_dopo)
+        log.info("F13 #%d inviato - %s", pressioni, ultimo_esito)
+    else:
+        ultimo_esito = ("SCARTATO dal sistema (idle {:.1f}s -> {:.1f}s) - "
+                        "manca il permesso Accessibilita'?".format(idle_prima, idle_dopo))
+        log.warning("F13 #%d - %s", pressioni, ultimo_esito)
+    return ok
 
 
 def f13_loop():
@@ -175,6 +248,8 @@ def f13_loop():
                 return
             time.sleep(0.1)
     # tempo scaduto: chiudi anche l'icona nella barra dei menu
+    if not stop_event.is_set():
+        log.info("orario di fine raggiunto: chiusura")
     stop_event.set()
     if app_delegate is not None:
         app_delegate.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -210,11 +285,19 @@ def run_menu_bar():
             menu = NSMenu.alloc().init()
             menu.setDelegate_(self)
 
-            self.statoItem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                self._testo_stato(), None, ""
+            self.statoItems = []
+            for riga in self._righe_stato():
+                it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(riga, None, "")
+                it.setEnabled_(False)
+                menu.addItem_(it)
+                self.statoItems.append(it)
+            menu.addItem_(NSMenuItem.separatorItem())
+
+            logItem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Apri il log...", "apriLog:", ""
             )
-            self.statoItem.setEnabled_(False)
-            menu.addItem_(self.statoItem)
+            logItem.setTarget_(self)
+            menu.addItem_(logItem)
             menu.addItem_(NSMenuItem.separatorItem())
 
             esciItem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -228,15 +311,23 @@ def run_menu_bar():
             self.worker = threading.Thread(target=f13_loop, daemon=True)
             self.worker.start()
 
-        def _testo_stato(self):
-            if ORARIO_FINE:
-                return "Stato: avviato - fine {}".format(ORARIO_FINE)
-            return "Stato: avviato - senza scadenza"
+        def _righe_stato(self):
+            righe = ["Pressioni inviate: {}".format(pressioni)]
+            if ultima_pressione:
+                righe.append("Ultima: {}".format(ultima_pressione.strftime("%H:%M:%S")))
+            righe.append("Esito: {}".format(ultimo_esito))
+            righe.append("Idle di sistema: {:.0f}s".format(idle_sistema()))
+            righe.append("Intervallo: {}s".format(INTERVALLO_SEC))
+            righe.append("Fine: {}".format(ORARIO_FINE if ORARIO_FINE else "nessuna"))
+            return righe
 
-        # NSMenuDelegate: aggiorna il testo all'apertura del menu
+        # NSMenuDelegate: aggiorna i valori all'apertura del menu
         def menuWillOpen_(self, menu):
-            if hasattr(self, "statoItem"):
-                self.statoItem.setTitle_(self._testo_stato())
+            for it, riga in zip(getattr(self, "statoItems", []), self._righe_stato()):
+                it.setTitle_(riga)
+
+        def apriLog_(self, sender):
+            subprocess.Popen(["open", "-a", "Console", LOG_FILE])
 
         def esci_(self, sender):
             self._spegni()
@@ -276,16 +367,72 @@ def run_headless():
     t.join(timeout=2)
 
 
+def autotest():
+    """Diagnostica: una pressione singola con verdetto esplicito. Esce subito."""
+    print("=== F13 Sender - test ===")
+    print("Python      : {}".format(sys.executable))
+    trusted = appservices.AXIsProcessTrusted()
+    print("Accessibilita': {}".format("OK" if trusted else "MANCANTE"))
+
+    try:
+        import AppKit  # noqa: F401
+        print("PyObjC      : disponibile (icona nella barra dei menu)")
+    except ImportError:
+        print("PyObjC      : assente (modalita' headless)")
+
+    print("Idle attuale: {:.1f}s".format(idle_sistema()))
+    print("\nNON toccare tastiera e mouse per 3 secondi...")
+    time.sleep(3)
+
+    prima = idle_sistema()
+    print("Idle prima di F13 : {:.1f}s".format(prima))
+    press_f13()
+    dopo = idle_sistema()
+    print("Idle dopo F13     : {:.1f}s".format(dopo))
+
+    if dopo < prima:
+        print("\nFUNZIONA: l'idle si e' azzerato, il sistema ha accettato F13.")
+        print("Teams ti vedra' attivo finche' lo script gira.")
+        return 0
+
+    print("\nNON FUNZIONA: l'idle non e' sceso, macOS ha scartato l'evento.")
+    if not trusted:
+        print("Causa: manca il permesso Accessibilita'.")
+        print("Impostazioni di Sistema > Privacy e Sicurezza > Accessibilita'")
+        print("e autorizza: {}".format(sys.executable))
+        print("Dopo averlo dato, CHIUDI e riapri il Terminale.")
+    else:
+        print("Il permesso risulta concesso: prova a rimuovere e ri-aggiungere")
+        print("l'app nell'elenco Accessibilita', poi riavvia il Terminale.")
+    return 1
+
+
 def main():
+    if "--test" in sys.argv:
+        setup_logging()
+        sys.exit(autotest())
+
+    setup_logging()
+
+    trusted = appservices.AXIsProcessTrusted()
+    log.info("--- avvio (pid %d, python %s) ---", os.getpid(), sys.executable)
+    log.info("intervallo=%ss  fine=%s  accessibilita=%s  debug=%s",
+             INTERVALLO_SEC, ORARIO_FINE or "nessuna",
+             "OK" if trusted else "MANCANTE", DEBUG)
+
     accessibility_check()
 
     try:
         import AppKit  # noqa: F401
         import Foundation  # noqa: F401
     except ImportError:
+        log.info("PyObjC non disponibile: modalita' headless")
         run_headless()
     else:
+        log.info("modalita' barra dei menu")
         run_menu_bar()
+
+    log.info("--- arresto (pressioni totali: %d) ---", pressioni)
 
 
 if __name__ == "__main__":

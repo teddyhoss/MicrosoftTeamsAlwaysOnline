@@ -108,6 +108,32 @@ python3 F13_macos.py
 An `F13` item appears in the menu bar; click it for status or "Esci" to quit.
 If PyObjC is not available the script falls back to headless mode (Ctrl-C to stop).
 
+### Is it working?
+
+```bash
+python3 F13_macos.py --test    # one keypress, explicit verdict, then exit
+python3 F13_macos.py --debug   # foreground, 5 s interval, live log
+```
+
+`--test` reads the system idle timer before and after the keypress: if the idle
+drops to zero the event was accepted, otherwise macOS discarded it (almost
+always a missing Accessibility permission) and the output says how to fix it.
+
+In normal mode the menu bar item shows the live counters (keypresses sent, last
+one, outcome, current system idle) and everything is logged to:
+
+```
+~/Library/Logs/F13Sender.log
+```
+
+Independent check, from any terminal — this counts seconds since the last input
+event, and it must never climb past your configured interval while the script
+runs:
+
+```bash
+ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF/1000000000 " s"}'
+```
+
 To distribute as a single executable:
 
 ```bash
@@ -224,6 +250,32 @@ python3 F13_macos.py
 
 Compare una voce `F13` nella barra dei menu: cliccala per lo stato o "Esci" per chiudere.
 Se PyObjC non e' disponibile lo script gira in modalita' headless (Ctrl-C per fermarlo).
+
+### Come capire se sta funzionando
+
+```bash
+python3 F13_macos.py --test    # una pressione, verdetto esplicito, poi esce
+python3 F13_macos.py --debug   # primo piano, intervallo 5 s, log a video
+```
+
+`--test` legge l'idle timer di sistema prima e dopo la pressione: se l'idle si
+azzera l'evento e' stato accettato, altrimenti macOS lo ha scartato (quasi
+sempre manca il permesso Accessibilita') e l'output spiega come rimediare.
+
+In modalita' normale la voce nella barra dei menu mostra i contatori aggiornati
+(pressioni inviate, ultima, esito, idle di sistema) e tutto viene registrato in:
+
+```
+~/Library/Logs/F13Sender.log
+```
+
+Verifica indipendente, da qualsiasi terminale — conta i secondi dall'ultimo
+evento di input e non deve mai superare l'intervallo configurato mentre lo
+script gira:
+
+```bash
+ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF/1000000000 " s"}'
+```
 
 Per distribuire come eseguibile singolo:
 
