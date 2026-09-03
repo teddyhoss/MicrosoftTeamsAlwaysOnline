@@ -171,19 +171,24 @@ def accessibility_check():
         "e autorizza l'app da cui avvii lo script (Terminale o Python).\n\n"
         "Senza questo permesso le pressioni di F13 vengono scartate dal sistema."
     )
+    avvisa(testo)
+    return False
+
+
+def avvisa(testo):
+    """Messaggio all'utente: a terminale se c'e', altrimenti dialog di sistema."""
     if sys.stderr and sys.stderr.isatty():
         print(testo, file=sys.stderr)
-    else:
-        try:
-            subprocess.run(
-                ["osascript", "-e",
-                 'display dialog {} with title "F13 Sender" buttons {{"OK"}} default button 1'
-                 .format(_applescript_quote(testo))],
-                check=False, capture_output=True,
-            )
-        except OSError:
-            pass
-    return False
+        return
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             'display dialog {} with title "F13 Sender" buttons {{"OK"}} default button 1'
+             .format(_applescript_quote(testo))],
+            check=False, capture_output=True,
+        )
+    except OSError:
+        pass
 
 
 def _applescript_quote(s):
@@ -267,7 +272,7 @@ def run_menu_bar():
         NSVariableStatusItemLength,
         NSApplicationActivationPolicyAccessory,
     )
-    from Foundation import NSObject
+    from Foundation import NSObject, NSTimer
 
     global app_delegate
 
@@ -277,10 +282,8 @@ def run_menu_bar():
             self.statusItem = NSStatusBar.systemStatusBar().statusItemWithLength_(
                 NSVariableStatusItemLength
             )
-            button = self.statusItem.button()
-            if button is not None:
-                button.setTitle_("F13")
-                button.setToolTip_("F13 Sender")
+            self.statusItem.setVisible_(True)
+            self._aggiorna_titolo()
 
             menu = NSMenu.alloc().init()
             menu.setDelegate_(self)
@@ -292,6 +295,12 @@ def run_menu_bar():
                 menu.addItem_(it)
                 self.statoItems.append(it)
             menu.addItem_(NSMenuItem.separatorItem())
+
+            testItem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Invia F13 adesso", "premiOra:", ""
+            )
+            testItem.setTarget_(self)
+            menu.addItem_(testItem)
 
             logItem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Apri il log...", "apriLog:", ""
@@ -308,11 +317,49 @@ def run_menu_bar():
 
             self.statusItem.setMenu_(menu)
 
+            # Refresh del titolo dal main thread: niente chiamate UI dal worker.
+            self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                1.0, self, "tick:", None, True
+            )
+
+            log.info("icona nella barra dei menu creata")
+
             self.worker = threading.Thread(target=f13_loop, daemon=True)
             self.worker.start()
 
+        # ----- titolo: stato leggibile a colpo d'occhio -----
+        def _aggiorna_titolo(self):
+            button = self.statusItem.button()
+            if button is None:
+                return
+            if stop_event.is_set():
+                simbolo, tip = "F13 x", "Fermato"
+            elif pressioni == 0:
+                simbolo, tip = "F13 ...", "In attesa della prima pressione"
+            elif ultimo_esito.startswith("OK"):
+                # conto alla rovescia fino alla prossima pressione
+                mancano = INTERVALLO_SEC - int((datetime.now() - ultima_pressione).total_seconds())
+                mancano = max(0, mancano)
+                simbolo = "F13 * {}".format(pressioni)
+                tip = "Attivo - {} pressioni - prossima tra {}s".format(pressioni, mancano)
+            else:
+                simbolo, tip = "F13 !", "PROBLEMA: " + ultimo_esito
+            button.setTitle_(simbolo)
+            button.setToolTip_(tip)
+
+        def tick_(self, timer):
+            self._aggiorna_titolo()
+            if stop_event.is_set() and not getattr(self, "_chiuso", False):
+                self._spegni()
+
         def _righe_stato(self):
-            righe = ["Pressioni inviate: {}".format(pressioni)]
+            if pressioni == 0:
+                testa = "In avvio, nessuna pressione ancora inviata"
+            elif ultimo_esito.startswith("OK"):
+                testa = "FUNZIONA - Teams ti vede attivo"
+            else:
+                testa = "NON FUNZIONA - vedi 'Esito' qui sotto"
+            righe = [testa, "", "Pressioni inviate: {}".format(pressioni)]
             if ultima_pressione:
                 righe.append("Ultima: {}".format(ultima_pressione.strftime("%H:%M:%S")))
             righe.append("Esito: {}".format(ultimo_esito))
@@ -325,6 +372,11 @@ def run_menu_bar():
         def menuWillOpen_(self, menu):
             for it, riga in zip(getattr(self, "statoItems", []), self._righe_stato()):
                 it.setTitle_(riga)
+
+        def premiOra_(self, sender):
+            """Pressione manuale: riscontro immediato senza aspettare l'intervallo."""
+            press_f13()
+            self._aggiorna_titolo()
 
         def apriLog_(self, sender):
             subprocess.Popen(["open", "-a", "Console", LOG_FILE])
@@ -339,7 +391,10 @@ def run_menu_bar():
             stop_event.set()
 
         def _spegni(self):
+            self._chiuso = True
             stop_event.set()
+            if hasattr(self, "timer"):
+                self.timer.invalidate()
             if hasattr(self, "statusItem"):
                 NSStatusBar.systemStatusBar().removeStatusItem_(self.statusItem)
             NSApplication.sharedApplication().terminate_(self)
@@ -376,9 +431,13 @@ def autotest():
 
     try:
         import AppKit  # noqa: F401
-        print("PyObjC      : disponibile (icona nella barra dei menu)")
+        pyobjc = True
+        print("PyObjC      : OK (icona nella barra dei menu disponibile)")
     except ImportError:
-        print("PyObjC      : assente (modalita' headless)")
+        pyobjc = False
+        print("PyObjC      : ASSENTE -> NESSUNA ICONA nella barra dei menu")
+        print("              installa con:")
+        print("                {} -m pip install pyobjc-framework-Cocoa".format(sys.executable))
 
     print("Idle attuale: {:.1f}s".format(idle_sistema()))
     print("\nNON toccare tastiera e mouse per 3 secondi...")
@@ -393,6 +452,9 @@ def autotest():
     if dopo < prima:
         print("\nFUNZIONA: l'idle si e' azzerato, il sistema ha accettato F13.")
         print("Teams ti vedra' attivo finche' lo script gira.")
+        if not pyobjc:
+            print("\nNota: senza PyObjC non vedrai l'icona in alto a destra,")
+            print("anche se lo script sta funzionando. Installalo per averla.")
         return 0
 
     print("\nNON FUNZIONA: l'idle non e' sceso, macOS ha scartato l'evento.")
@@ -425,8 +487,18 @@ def main():
     try:
         import AppKit  # noqa: F401
         import Foundation  # noqa: F401
-    except ImportError:
-        log.info("PyObjC non disponibile: modalita' headless")
+    except ImportError as e:
+        # Senza PyObjC l'icona non puo' esistere. Non fallire in silenzio:
+        # e' proprio il caso in cui l'utente non vede nulla e non capisce perche'.
+        log.warning("PyObjC non disponibile (%s): nessuna icona, modalita' headless", e)
+        avvisa(
+            "F13 Sender: icona non disponibile.\n\n"
+            "Manca PyObjC, quindi non posso creare l'icona nella barra dei menu.\n"
+            "Installalo con:\n\n"
+            "    {} -m pip install pyobjc-framework-Cocoa\n\n"
+            "Lo script continua comunque a funzionare senza icona.\n"
+            "Log: {}".format(sys.executable, LOG_FILE)
+        )
         run_headless()
     else:
         log.info("modalita' barra dei menu")

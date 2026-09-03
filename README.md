@@ -89,7 +89,7 @@ tray menu:
 | Icon | Win32 tray icon | menu bar status item (`NSStatusBar`) |
 | Silent launch | relaunch under `pythonw.exe` | relaunch detached via `start_new_session` |
 | Event loop | `GetMessageW` message pump | `NSApplication.run()` |
-| Dependencies | stdlib only | stdlib only (PyObjC optional, ships with macOS) |
+| Dependencies | stdlib only | stdlib for the keypress; PyObjC for the menu bar icon |
 
 ### Requirements
 
@@ -105,8 +105,32 @@ tray menu:
 python3 F13_macos.py
 ```
 
-An `F13` item appears in the menu bar; click it for status or "Esci" to quit.
-If PyObjC is not available the script falls back to headless mode (Ctrl-C to stop).
+### The menu bar icon
+
+The icon sits at the top right and tells you the state at a glance, without
+opening anything:
+
+| Title | Meaning |
+|---|---|
+| `F13 ...` | started, first keypress not sent yet |
+| `F13 * 12` | working — 12 keypresses accepted by the system |
+| `F13 !` | the system is discarding the keypresses (see the menu) |
+| `F13 x` | stopped |
+
+Hovering shows a tooltip with the countdown to the next keypress. Click it for
+the full status, an "Invia F13 adesso" entry to force a keypress and see the
+counter move immediately, the log, and "Esci".
+
+**The icon requires PyObjC**, which is NOT bundled with Homebrew or python.org
+builds of Python (only the old system Python 2.7 had it). Without it the script
+still works but shows no icon, so install it:
+
+```bash
+python3 -m pip install pyobjc-framework-Cocoa
+```
+
+If it is missing the script now says so explicitly instead of silently falling
+back to headless mode.
 
 ### Is it working?
 
@@ -232,7 +256,7 @@ menu tray:
 | Icona | icona tray Win32 | voce nella barra dei menu (`NSStatusBar`) |
 | Avvio silenzioso | ri-lancio con `pythonw.exe` | ri-lancio staccato con `start_new_session` |
 | Loop eventi | message pump `GetMessageW` | `NSApplication.run()` |
-| Dipendenze | solo stdlib | solo stdlib (PyObjC opzionale, incluso in macOS) |
+| Dipendenze | solo stdlib | stdlib per la pressione; PyObjC per l'icona |
 
 ### Requisiti
 
@@ -248,8 +272,32 @@ menu tray:
 python3 F13_macos.py
 ```
 
-Compare una voce `F13` nella barra dei menu: cliccala per lo stato o "Esci" per chiudere.
-Se PyObjC non e' disponibile lo script gira in modalita' headless (Ctrl-C per fermarlo).
+### L'icona nella barra dei menu
+
+L'icona sta in alto a destra e dice lo stato a colpo d'occhio, senza aprire
+nulla:
+
+| Titolo | Significato |
+|---|---|
+| `F13 ...` | avviato, prima pressione non ancora inviata |
+| `F13 * 12` | funziona — 12 pressioni accettate dal sistema |
+| `F13 !` | il sistema sta scartando le pressioni (vedi il menu) |
+| `F13 x` | fermato |
+
+Passandoci sopra il mouse compare il conto alla rovescia alla prossima
+pressione. Cliccandola trovi lo stato completo, la voce "Invia F13 adesso" per
+forzare una pressione e vedere subito il contatore muoversi, il log e "Esci".
+
+**L'icona richiede PyObjC**, che NON e' incluso nei Python di Homebrew o
+python.org (lo aveva solo il vecchio Python 2.7 di sistema). Senza, lo script
+funziona ma non mostra nessuna icona, quindi installalo:
+
+```bash
+python3 -m pip install pyobjc-framework-Cocoa
+```
+
+Se manca, ora lo script te lo dice esplicitamente invece di passare in
+modalita' headless in silenzio.
 
 ### Come capire se sta funzionando
 
