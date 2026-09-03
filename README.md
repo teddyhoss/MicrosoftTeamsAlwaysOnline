@@ -79,6 +79,41 @@ tray menu:
 
 ---
 
+## macOS version
+
+`F13_macos.py` is the macOS port. Same behaviour, different system APIs:
+
+| | `F13.py` (Windows) | `F13_macos.py` (macOS) |
+|---|---|---|
+| Key event | `user32.keybd_event` | `CGEventPost` (Quartz, HID level) |
+| Icon | Win32 tray icon | menu bar status item (`NSStatusBar`) |
+| Silent launch | relaunch under `pythonw.exe` | relaunch detached via `start_new_session` |
+| Event loop | `GetMessageW` message pump | `NSApplication.run()` |
+| Dependencies | stdlib only | stdlib only (PyObjC optional, ships with macOS) |
+
+### Requirements
+
+- macOS 10.13+
+- Python 3.6+
+- **Accessibility permission**: System Settings > Privacy & Security > Accessibility,
+  authorise the app you launch the script from (Terminal, or the Python binary).
+  Without it macOS silently discards the synthetic keypresses.
+
+### Usage
+
+```bash
+python3 F13_macos.py
+```
+
+An `F13` item appears in the menu bar; click it for status or "Esci" to quit.
+If PyObjC is not available the script falls back to headless mode (Ctrl-C to stop).
+
+To distribute as a single executable:
+
+```bash
+pyinstaller --noconsole --onefile F13_macos.py
+```
+
 ## Disclaimer
 
 This tool is provided for **educational purposes** to demonstrate synthetic input and Win32 tray integration on Windows. Use it responsibly and in compliance with your organization's policies.
@@ -160,6 +195,41 @@ menu tray:
 ```
 
 ---
+
+## Versione macOS
+
+`F13_macos.py` e' il port per macOS. Stesso comportamento, API di sistema diverse:
+
+| | `F13.py` (Windows) | `F13_macos.py` (macOS) |
+|---|---|---|
+| Evento tasto | `user32.keybd_event` | `CGEventPost` (Quartz, livello HID) |
+| Icona | icona tray Win32 | voce nella barra dei menu (`NSStatusBar`) |
+| Avvio silenzioso | ri-lancio con `pythonw.exe` | ri-lancio staccato con `start_new_session` |
+| Loop eventi | message pump `GetMessageW` | `NSApplication.run()` |
+| Dipendenze | solo stdlib | solo stdlib (PyObjC opzionale, incluso in macOS) |
+
+### Requisiti
+
+- macOS 10.13+
+- Python 3.6+
+- **Permesso Accessibilita'**: Impostazioni di Sistema > Privacy e Sicurezza > Accessibilita',
+  autorizzare l'app da cui si avvia lo script (Terminale, oppure il binario Python).
+  Senza questo permesso macOS scarta silenziosamente le pressioni sintetiche.
+
+### Utilizzo
+
+```bash
+python3 F13_macos.py
+```
+
+Compare una voce `F13` nella barra dei menu: cliccala per lo stato o "Esci" per chiudere.
+Se PyObjC non e' disponibile lo script gira in modalita' headless (Ctrl-C per fermarlo).
+
+Per distribuire come eseguibile singolo:
+
+```bash
+pyinstaller --noconsole --onefile F13_macos.py
+```
 
 ## Disclaimer
 
