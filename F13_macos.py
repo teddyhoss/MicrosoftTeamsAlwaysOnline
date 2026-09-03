@@ -26,7 +26,7 @@ import signal
 import threading
 import subprocess
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ========= CONFIG =========
 INTERVALLO_SEC = 180        # ogni quanti secondi premere F13
@@ -153,7 +153,12 @@ def parse_end_time(hhmm):
     if not hhmm:
         return None
     now = datetime.now()
-    return datetime.strptime(hhmm, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+    end_dt = datetime.strptime(hhmm, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+    if end_dt <= now:
+        # l'orario e' gia' passato oggi: evita che lo script si chiuda
+        # subito dopo l'avvio, spostando la scadenza a domani.
+        end_dt += timedelta(days=1)
+    return end_dt
 
 
 def end_reached(end_dt):

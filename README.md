@@ -41,6 +41,9 @@ INTERVALLO_SEC = 180      # interval between keypresses (seconds)
 ORARIO_FINE    = "18:00"  # stop time "HH:MM", or "" / None to run forever
 ```
 
+If you start the script when the stop time has already passed today, it runs
+until that time **tomorrow** rather than quitting immediately.
+
 ---
 
 ## Usage
@@ -207,6 +210,9 @@ Modifica la sezione `CONFIG` in cima a `F13.py`:
 INTERVALLO_SEC = 180      # intervallo tra le pressioni (secondi)
 ORARIO_FINE    = "18:00"  # orario di fine "HH:MM", oppure "" / None per infinito
 ```
+
+Se avvii lo script quando l'orario di fine e' gia' passato per oggi, gira fino a
+quell'ora di **domani** invece di chiudersi subito.
 
 ---
 

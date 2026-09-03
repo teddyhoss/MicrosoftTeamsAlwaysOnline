@@ -5,7 +5,7 @@ import ctypes
 import threading
 import subprocess
 from ctypes import wintypes
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def relaunch_with_pythonw_if_needed():
@@ -137,7 +137,12 @@ def parse_end_time(hhmm: str):
     if not hhmm:
         return None
     now = datetime.now()
-    return datetime.strptime(hhmm, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+    end_dt = datetime.strptime(hhmm, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+    if end_dt <= now:
+        # l'orario e' gia' passato oggi: evita che lo script si chiuda
+        # subito dopo l'avvio, spostando la scadenza a domani.
+        end_dt += timedelta(days=1)
+    return end_dt
 
 
 def end_reached(end_dt):
